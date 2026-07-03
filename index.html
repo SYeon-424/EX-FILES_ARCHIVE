@@ -240,7 +240,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 // 원본 UI는 "아이디"로 로그인하지만 Supabase Auth는 이메일 기반이라,
 // 아이디를 내부적으로 가짜 이메일로 변환해서 씁니다. 사용자에게는 노출되지 않습니다.
 function usernameToEmail(username){
-  return username.trim().toLowerCase().replace(/[^a-z0-9_\-]/g, "_") + "@exfiles.local";
+  return username.trim().toLowerCase().replace(/[^a-z0-9_\-]/g, "_") + "@exfiles.com";
 }
 
 let state = {
