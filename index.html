@@ -186,6 +186,7 @@
   .more{font-size:11px;color:var(--verdigris);cursor:pointer;font-weight:700;}
   .card-footer{display:flex;justify-content:space-between;align-items:center;margin-top:12px;padding-top:10px;border-top:1px solid var(--paper-shadow);flex-wrap:wrap;gap:8px;}
   .reporter{font-size:11px;color:var(--ink-soft);font-family:'JetBrains Mono',monospace;}
+  .card-actions{display:flex;gap:8px;flex-wrap:wrap;}
   .witness-btn{
     font-family:'Noto Sans KR',sans-serif;font-size:11px;font-weight:700;
     background:transparent;border:1px solid var(--verdigris);color:var(--verdigris);
@@ -194,6 +195,12 @@
   .witness-btn:hover{background:var(--verdigris);color:#fff;}
   .witness-btn.done{border-color:var(--paper-shadow);color:var(--ink-soft);cursor:default;}
   .witness-btn.done:hover{background:transparent;}
+  .edit-btn{
+    font-family:'Noto Sans KR',sans-serif;font-size:11px;font-weight:700;
+    background:transparent;border:1px solid var(--brass);color:var(--brass);
+    padding:6px 10px;border-radius:14px;cursor:pointer;
+  }
+  .edit-btn:hover{background:var(--brass);color:#1a1608;}
 
   .empty{
     text-align:center;padding:60px 20px;color:var(--ink-soft);
@@ -251,6 +258,7 @@ let state = {
   authError: "",
   authBusy: false,
   showIntake: false,
+  editingId: null,
   filterCat: "all",
   search: "",
   expanded: {},
@@ -416,6 +424,31 @@ async function addSighting(data){
   }
   render();
 }
+async function updateSighting(id, data){
+  try{
+    const { data: updated, error } = await sb
+      .from("sightings")
+      .update({
+        title: data.title,
+        category: data.category,
+        location: data.location,
+        date: data.date || null,
+        description: data.desc,
+        image: data.image || null,
+      })
+      .eq("id", id)
+      .select("*, witnesses(username)")
+      .single();
+    if(error) throw error;
+    const mapped = mapSighting(updated);
+    state.sightings = state.sightings.map(s => s.id === id ? mapped : s);
+    state.editingId = null;
+    state.banner = null;
+  }catch(e){
+    state.banner = "⚠ 사건 파일 수정에 실패했습니다: " + friendlyAuthError(e.message);
+  }
+  render();
+}
 async function addWitness(id){
   const s = state.sightings.find(x=>x.id===id);
   if(!s) return;
@@ -493,6 +526,8 @@ function renderMain(){
       return (s.title||"").toLowerCase().includes(q) || (s.location||"").toLowerCase().includes(q) || (s.desc||"").toLowerCase().includes(q);
     });
 
+  const editingSighting = state.editingId ? state.sightings.find(s=>s.id===state.editingId) : null;
+
   return `
     <div class="topbar">
       <div class="agent">조사관 <b>${esc(state.currentUser)}</b> 님, 접속을 환영합니다.</div>
@@ -503,6 +538,7 @@ function renderMain(){
     </div>
 
     ${state.showIntake ? renderIntake() : ""}
+    ${editingSighting ? renderIntake(editingSighting) : ""}
 
     <div class="controls">
       <select id="filter-cat">
@@ -521,42 +557,44 @@ function renderMain(){
   `;
 }
 
-function renderIntake(){
+function renderIntake(editData){
+  const isEdit = !!editData;
+  const v = editData || {};
   return `
     <div class="intake">
-      <h3>사건 접수 양식</h3>
-      <form id="intake-form">
+      <h3>${isEdit ? "사건 파일 수정" : "사건 접수 양식"}</h3>
+      <form id="intake-form" data-edit-id="${isEdit ? esc(v.id) : ""}">
         <div class="grid2">
           <div class="field">
             <label>사건명 / 제목</label>
-            <input type="text" id="in-title" placeholder="예) 뒷산에서 목격한 발광체" required>
+            <input type="text" id="in-title" placeholder="예) 뒷산에서 목격한 발광체" value="${esc(v.title||"")}" required>
           </div>
           <div class="field">
             <label>분류</label>
             <select id="in-category">
-              ${CATEGORIES.map(c=>`<option value="${c.v}">${c.label}</option>`).join("")}
+              ${CATEGORIES.map(c=>`<option value="${c.v}" ${v.category===c.v?'selected':''}>${c.label}</option>`).join("")}
             </select>
           </div>
           <div class="field">
             <label>목격 장소</label>
-            <input type="text" id="in-location" placeholder="예) 대구 앞산공원 인근" required>
+            <input type="text" id="in-location" placeholder="예) 대구 앞산공원 인근" value="${esc(v.location||"")}" required>
           </div>
           <div class="field">
             <label>목격 일시</label>
-            <input type="date" id="in-date">
+            <input type="date" id="in-date" value="${esc(v.date||"")}">
           </div>
         </div>
         <div class="field">
           <label>이미지 URL (선택)</label>
-          <input type="text" id="in-image" placeholder="https:// 로 시작하는 이미지 링크를 붙여넣으세요">
+          <input type="text" id="in-image" placeholder="https:// 로 시작하는 이미지 링크를 붙여넣으세요" value="${esc(v.image||"")}">
         </div>
         <div class="field">
           <label>상세 내용</label>
-          <textarea id="in-desc" rows="4" placeholder="목격 당시 상황을 최대한 구체적으로 적어주세요." required></textarea>
+          <textarea id="in-desc" rows="4" placeholder="목격 당시 상황을 최대한 구체적으로 적어주세요." required>${esc(v.desc||"")}</textarea>
         </div>
         <div class="intake-actions">
           <button type="button" class="btn" id="cancel-intake">취소</button>
-          <button type="submit" class="btn primary">사건 파일 등록</button>
+          <button type="submit" class="btn primary">${isEdit ? "수정 내용 저장" : "사건 파일 등록"}</button>
         </div>
       </form>
     </div>
@@ -568,6 +606,7 @@ function renderCard(s){
   const expanded = !!state.expanded[s.id];
   const wCount = (s.witnesses||[]).length;
   const iAmWitness = (s.witnesses||[]).includes(state.currentUser) || s.reporter===state.currentUser;
+  const iAmAuthor = s.reporter === state.currentUser;
   return `
     <div class="card">
       <div class="card-top">
@@ -585,9 +624,12 @@ function renderCard(s){
       <div class="more" data-expand="${s.id}">${expanded ? "접기" : "전체 내용 보기"}</div>
       <div class="card-footer">
         <span class="reporter">제보자 · ${esc(s.reporter)} · 동일 목격 ${wCount}건</span>
-        <button class="witness-btn ${iAmWitness?'done':''}" data-witness="${s.id}" ${iAmWitness?'disabled':''}>
-          ${iAmWitness ? "제보 반영됨" : "나도 봤어요"}
-        </button>
+        <div class="card-actions">
+          ${iAmAuthor ? `<button class="edit-btn" data-edit="${s.id}">수정</button>` : ""}
+          <button class="witness-btn ${iAmWitness?'done':''}" data-witness="${s.id}" ${iAmWitness?'disabled':''}>
+            ${iAmWitness ? "제보 반영됨" : "나도 봤어요"}
+          </button>
+        </div>
       </div>
     </div>
   `;
@@ -612,9 +654,9 @@ function bindEvents(){
   if(dismissBanner) dismissBanner.onclick = ()=>{ state.banner = null; render(); };
 
   const toggleIntake = document.getElementById("toggle-intake");
-  if(toggleIntake) toggleIntake.onclick = ()=>{ state.showIntake = !state.showIntake; render(); };
+  if(toggleIntake) toggleIntake.onclick = ()=>{ state.showIntake = !state.showIntake; state.editingId = null; render(); };
   const cancelIntake = document.getElementById("cancel-intake");
-  if(cancelIntake) cancelIntake.onclick = ()=>{ state.showIntake = false; render(); };
+  if(cancelIntake) cancelIntake.onclick = ()=>{ state.showIntake = false; state.editingId = null; render(); };
 
   const intakeForm = document.getElementById("intake-form");
   if(intakeForm){
@@ -627,7 +669,12 @@ function bindEvents(){
       const image = document.getElementById("in-image").value.trim();
       const desc = document.getElementById("in-desc").value.trim();
       if(!title || !location || !desc) return;
-      addSighting({title, category, location, date, desc, image});
+      const editId = intakeForm.dataset.editId;
+      if(editId){
+        updateSighting(editId, {title, category, location, date, desc, image});
+      }else{
+        addSighting({title, category, location, date, desc, image});
+      }
     };
   }
 
@@ -644,6 +691,9 @@ function bindEvents(){
   });
   document.querySelectorAll("[data-witness]").forEach(el=>{
     el.onclick = ()=>{ addWitness(el.dataset.witness); };
+  });
+  document.querySelectorAll("[data-edit]").forEach(el=>{
+    el.onclick = ()=>{ state.editingId = el.dataset.edit; state.showIntake = false; render(); };
   });
   document.querySelectorAll("[data-lightbox]").forEach(el=>{
     el.onclick = ()=>{ state.lightboxImg = el.dataset.lightbox; render(); };
