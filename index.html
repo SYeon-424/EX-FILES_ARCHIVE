@@ -202,6 +202,29 @@
   }
   .edit-btn:hover{background:var(--brass);color:#1a1608;}
 
+  .comments-toggle{
+    margin-top:12px;padding-top:10px;border-top:1px dashed var(--paper-shadow);
+    font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--verdigris);
+    cursor:pointer;font-weight:700;
+  }
+  .comments{margin-top:10px;display:flex;flex-direction:column;gap:8px;}
+  .no-comments{font-size:12px;color:var(--ink-soft);font-family:'JetBrains Mono',monospace;}
+  .comment{
+    background:#f6f0dd;border:1px solid var(--paper-shadow);border-radius:6px;
+    padding:8px 10px;font-size:13px;line-height:1.5;
+  }
+  .comment-author{
+    font-family:'JetBrains Mono',monospace;font-weight:700;font-size:11px;
+    color:var(--brass);margin-right:8px;
+  }
+  .comment-text{color:var(--ink);word-break:break-word;}
+  .comment-form{display:flex;gap:8px;margin-top:2px;}
+  .comment-form .comment-input{
+    flex:1;padding:8px 10px;font-size:13px;border:1px solid var(--paper-shadow);
+    background:#f6f0dd;color:var(--ink);border-radius:4px;font-family:'Noto Sans KR',sans-serif;
+  }
+  .comment-form .btn{padding:8px 14px;font-size:12px;}
+
   .empty{
     text-align:center;padding:60px 20px;color:var(--ink-soft);
     font-family:'JetBrains Mono',monospace;font-size:13px;
@@ -262,6 +285,7 @@ let state = {
   filterCat: "all",
   search: "",
   expanded: {},
+  commentsOpen: {},
   banner: null,
   lightboxImg: null,
 };
@@ -293,14 +317,21 @@ function mapSighting(row){
     reporter: row.reporter,
     createdAt: row.created_at,
     witnesses: (row.witnesses || []).map(w => w.username),
+    comments: (row.comments || []).map(c => ({
+      id: c.id,
+      author: c.author,
+      content: c.content,
+      createdAt: c.created_at,
+    })),
   };
 }
 
 async function fetchSightings(){
   const { data, error } = await sb
     .from("sightings")
-    .select("*, witnesses(username)")
-    .order("created_at", { ascending: false });
+    .select("*, witnesses(username), comments(id, author, content, created_at)")
+    .order("created_at", { ascending: false })
+    .order("created_at", { foreignTable: "comments", ascending: true });
   if(error) throw error;
   return (data || []).map(mapSighting);
 }
@@ -458,6 +489,8 @@ async function updateSighting(id, data){
       .single();
     if(error) throw error;
     const mapped = mapSighting(updated);
+    const prev = state.sightings.find(s => s.id === id);
+    mapped.comments = prev ? prev.comments : [];
     state.sightings = state.sightings.map(s => s.id === id ? mapped : s);
     state.editingId = null;
     state.banner = null;
@@ -483,6 +516,30 @@ async function addWitness(id){
     state.banner = "⚠ 목격 반영에 실패했습니다: " + friendlyAuthError(e.message);
     render();
   }
+}
+
+async function addComment(sightingId, content){
+  const text = (content || "").trim();
+  if(!text) return;
+  const s = state.sightings.find(x=>x.id===sightingId);
+  if(!s) return;
+  try{
+    const { data: created, error } = await sb
+      .from("comments")
+      .insert({ sighting_id: sightingId, content: text })
+      .select("id, author, content, created_at")
+      .single();
+    if(error) throw error;
+    s.comments = [...(s.comments||[]), {
+      id: created.id,
+      author: created.author,
+      content: created.content,
+      createdAt: created.created_at,
+    }];
+  }catch(e){
+    state.banner = "⚠ 댓글 등록에 실패했습니다: " + friendlyAuthError(e.message);
+  }
+  render();
 }
 
 /* ---------------- Render ---------------- */
@@ -653,6 +710,26 @@ function renderCard(s){
           </button>
         </div>
       </div>
+      <div class="comments-toggle" data-comments-toggle="${s.id}">💬 댓글 ${(s.comments||[]).length}개 ${state.commentsOpen[s.id] ? "숨기기" : "보기"}</div>
+      ${state.commentsOpen[s.id] ? renderComments(s) : ""}
+    </div>
+  `;
+}
+
+function renderComments(s){
+  const list = s.comments || [];
+  return `
+    <div class="comments">
+      ${list.length===0 ? `<div class="no-comments">아직 댓글이 없습니다. 첫 댓글을 남겨보세요.</div>` : list.map(c => `
+        <div class="comment">
+          <span class="comment-author">${esc(c.author)}</span>
+          <span class="comment-text">${esc(c.content)}</span>
+        </div>
+      `).join("")}
+      <form class="comment-form" data-comment-form="${s.id}">
+        <input type="text" class="comment-input" placeholder="댓글을 입력하세요" maxlength="500">
+        <button type="submit" class="btn primary">등록</button>
+      </form>
     </div>
   `;
 }
@@ -744,6 +821,24 @@ function bindEvents(){
   });
   document.querySelectorAll("[data-edit]").forEach(el=>{
     el.onclick = ()=>{ pendingImageFile = null; state.editingId = el.dataset.edit; state.showIntake = false; render(); };
+  });
+  document.querySelectorAll("[data-comments-toggle]").forEach(el=>{
+    el.onclick = ()=>{
+      const id = el.dataset.commentsToggle;
+      state.commentsOpen[id] = !state.commentsOpen[id];
+      render();
+    };
+  });
+  document.querySelectorAll("[data-comment-form]").forEach(form=>{
+    form.onsubmit = (e)=>{
+      e.preventDefault();
+      const id = form.dataset.commentForm;
+      const input = form.querySelector(".comment-input");
+      const text = input.value;
+      if(!text.trim()) return;
+      input.disabled = true;
+      addComment(id, text);
+    };
   });
   document.querySelectorAll("[data-lightbox]").forEach(el=>{
     el.onclick = ()=>{ state.lightboxImg = el.dataset.lightbox; render(); };
