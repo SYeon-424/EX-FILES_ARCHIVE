@@ -905,7 +905,22 @@ function bindEvents(){
   if(filterCat) filterCat.onchange = ()=>{ state.filterCat = filterCat.value; render(); };
   const searchBox = document.getElementById("search-box");
   if(searchBox){
-    searchBox.oninput = ()=>{ state.search = searchBox.value; render(); };
+    searchBox.oninput = ()=>{
+      state.search = searchBox.value;
+      // 한글 등 조합형 입력(IME) 도중에는 다시 그리지 않음 — 그리면 입력창이
+      // 새로 생성되면서 조합 중이던 자모가 끊겨 깨져 보이게 됨.
+      if(!searchBox.dataset.composing){
+        render();
+      }
+    };
+    searchBox.addEventListener("compositionstart", ()=>{
+      searchBox.dataset.composing = "1";
+    });
+    searchBox.addEventListener("compositionend", ()=>{
+      delete searchBox.dataset.composing;
+      state.search = searchBox.value;
+      render();
+    });
     const val = searchBox.value; searchBox.focus(); searchBox.setSelectionRange(val.length,val.length);
   }
 
