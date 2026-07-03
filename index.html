@@ -623,6 +623,13 @@ function render(){
     root.innerHTML = `<div class="empty">기록보관소 접속 중...</div>`;
     return;
   }
+  // 검색창에 커서가 있던 경우에만 다시 그린 후에도 포커스를 되돌려줌.
+  // (다른 버튼을 눌러서 다시 그려질 때 검색창으로 포커스가 튀어 키보드가
+  //  뜨는 것을 방지하기 위함)
+  const activeEl = document.activeElement;
+  const wasSearchFocused = activeEl && activeEl.id === "search-box";
+  const searchSelectionStart = wasSearchFocused ? activeEl.selectionStart : null;
+
   root.innerHTML = `
     <div class="header">
       <div class="tab">
@@ -637,6 +644,14 @@ function render(){
     <footer class="note">본 기록보관소는 참여자 간 재미로 공유되는 제보 아카이브이며, 인증된 조사 자료가 아닙니다.</footer>
   `;
   bindEvents();
+
+  if(wasSearchFocused){
+    const newSearchBox = document.getElementById("search-box");
+    if(newSearchBox){
+      newSearchBox.focus();
+      newSearchBox.setSelectionRange(searchSelectionStart, searchSelectionStart);
+    }
+  }
 }
 
 function renderAuth(){
@@ -921,7 +936,6 @@ function bindEvents(){
       state.search = searchBox.value;
       render();
     });
-    const val = searchBox.value; searchBox.focus(); searchBox.setSelectionRange(val.length,val.length);
   }
 
   document.querySelectorAll("[data-expand]").forEach(el=>{
