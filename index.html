@@ -266,6 +266,10 @@ let state = {
   lightboxImg: null,
 };
 
+// 폼에서 선택된(아직 업로드 안 된) 이미지 파일. 제출 시점에 Storage로 업로드합니다.
+const IMAGE_BUCKET = "sighting-images";
+let pendingImageFile = null;
+
 const root = document.getElementById("root");
 
 function friendlyAuthError(msg){
@@ -398,6 +402,19 @@ async function doLogout(){
   state.currentUser = null;
   state.showIntake = false;
   render();
+}
+
+/* ---------------- Image upload ---------------- */
+async function uploadImage(file){
+  const safeExt = (file.name.split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const path = `${crypto.randomUUID()}.${safeExt || "jpg"}`;
+  const { error } = await sb.storage.from(IMAGE_BUCKET).upload(path, file, {
+    cacheControl: "3600",
+    upsert: false,
+  });
+  if(error) throw error;
+  const { data } = sb.storage.from(IMAGE_BUCKET).getPublicUrl(path);
+  return data.publicUrl;
 }
 
 /* ---------------- Sighting actions ---------------- */
@@ -585,7 +602,12 @@ function renderIntake(editData){
           </div>
         </div>
         <div class="field">
-          <label>이미지 URL (선택)</label>
+          <label>이미지 업로드 (선택)</label>
+          <input type="file" id="in-image-file" accept="image/*">
+          <img id="image-preview" src="${esc(v.image||"")}" style="max-width:180px;max-height:130px;border-radius:4px;border:1px solid var(--paper-shadow);display:${v.image?'block':'none'};margin-top:8px;">
+        </div>
+        <div class="field">
+          <label>또는 이미지 URL 직접 입력</label>
           <input type="text" id="in-image" placeholder="https:// 로 시작하는 이미지 링크를 붙여넣으세요" value="${esc(v.image||"")}">
         </div>
         <div class="field">
@@ -654,21 +676,49 @@ function bindEvents(){
   if(dismissBanner) dismissBanner.onclick = ()=>{ state.banner = null; render(); };
 
   const toggleIntake = document.getElementById("toggle-intake");
-  if(toggleIntake) toggleIntake.onclick = ()=>{ state.showIntake = !state.showIntake; state.editingId = null; render(); };
+  if(toggleIntake) toggleIntake.onclick = ()=>{ pendingImageFile = null; state.showIntake = !state.showIntake; state.editingId = null; render(); };
   const cancelIntake = document.getElementById("cancel-intake");
-  if(cancelIntake) cancelIntake.onclick = ()=>{ state.showIntake = false; state.editingId = null; render(); };
+  if(cancelIntake) cancelIntake.onclick = ()=>{ pendingImageFile = null; state.showIntake = false; state.editingId = null; render(); };
 
   const intakeForm = document.getElementById("intake-form");
   if(intakeForm){
-    intakeForm.onsubmit = (e)=>{
+    const imageFileInput = document.getElementById("in-image-file");
+    if(imageFileInput){
+      imageFileInput.onchange = ()=>{
+        const file = imageFileInput.files[0] || null;
+        pendingImageFile = file;
+        const preview = document.getElementById("image-preview");
+        if(file && preview){
+          preview.src = URL.createObjectURL(file);
+          preview.style.display = "block";
+        }
+      };
+    }
+    intakeForm.onsubmit = async (e)=>{
       e.preventDefault();
       const title = document.getElementById("in-title").value.trim();
       const category = document.getElementById("in-category").value;
       const location = document.getElementById("in-location").value.trim();
       const date = document.getElementById("in-date").value;
-      const image = document.getElementById("in-image").value.trim();
+      let image = document.getElementById("in-image").value.trim();
       const desc = document.getElementById("in-desc").value.trim();
       if(!title || !location || !desc) return;
+      const submitBtn = intakeForm.querySelector('button[type="submit"]');
+      const originalLabel = submitBtn.textContent;
+      if(pendingImageFile){
+        submitBtn.disabled = true;
+        submitBtn.textContent = "이미지 업로드 중...";
+        try{
+          image = await uploadImage(pendingImageFile);
+        }catch(err){
+          submitBtn.disabled = false;
+          submitBtn.textContent = originalLabel;
+          state.banner = "⚠ 이미지 업로드에 실패했습니다: " + friendlyAuthError(err.message);
+          render();
+          return;
+        }
+      }
+      pendingImageFile = null;
       const editId = intakeForm.dataset.editId;
       if(editId){
         updateSighting(editId, {title, category, location, date, desc, image});
@@ -693,7 +743,7 @@ function bindEvents(){
     el.onclick = ()=>{ addWitness(el.dataset.witness); };
   });
   document.querySelectorAll("[data-edit]").forEach(el=>{
-    el.onclick = ()=>{ state.editingId = el.dataset.edit; state.showIntake = false; render(); };
+    el.onclick = ()=>{ pendingImageFile = null; state.editingId = el.dataset.edit; state.showIntake = false; render(); };
   });
   document.querySelectorAll("[data-lightbox]").forEach(el=>{
     el.onclick = ()=>{ state.lightboxImg = el.dataset.lightbox; render(); };
