@@ -201,6 +201,12 @@
     padding:6px 10px;border-radius:14px;cursor:pointer;
   }
   .edit-btn:hover{background:var(--brass);color:#1a1608;}
+  .delete-btn{
+    font-family:'Noto Sans KR',sans-serif;font-size:11px;font-weight:700;
+    background:transparent;border:1px solid var(--red-stamp);color:var(--red-stamp);
+    padding:6px 10px;border-radius:14px;cursor:pointer;
+  }
+  .delete-btn:hover{background:var(--red-stamp);color:#f2e9d8;}
 
   .comments-toggle{
     margin-top:12px;padding-top:10px;border-top:1px dashed var(--paper-shadow);
@@ -212,7 +218,21 @@
   .comment{
     background:#f6f0dd;border:1px solid var(--paper-shadow);border-radius:6px;
     padding:8px 10px;font-size:13px;line-height:1.5;
+    display:flex;justify-content:space-between;align-items:flex-start;gap:10px;
   }
+  .comment-body{flex:1;min-width:0;}
+  .comment-actions{display:flex;gap:8px;flex-shrink:0;}
+  .comment-action{
+    font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--ink-soft);
+    cursor:pointer;text-decoration:underline;white-space:nowrap;
+  }
+  .comment-action:hover{color:var(--red-stamp);}
+  .comment-edit-form{display:flex;gap:8px;align-items:center;}
+  .comment-edit-form .comment-input{
+    flex:1;padding:8px 10px;font-size:13px;border:1px solid var(--paper-shadow);
+    background:#f6f0dd;color:var(--ink);border-radius:4px;font-family:'Noto Sans KR',sans-serif;
+  }
+  .comment-edit-form .btn{padding:8px 12px;font-size:11px;color:var(--ink);border-color:var(--paper-shadow);}
   .comment-author{
     font-family:'JetBrains Mono',monospace;font-weight:700;font-size:11px;
     color:var(--brass);margin-right:8px;
@@ -286,6 +306,7 @@ let state = {
   search: "",
   expanded: {},
   commentsOpen: {},
+  editingComments: {},
   banner: null,
   lightboxImg: null,
 };
@@ -499,6 +520,19 @@ async function updateSighting(id, data){
   }
   render();
 }
+async function deleteSighting(id){
+  if(!window.confirm("이 사건 파일을 삭제할까요? 되돌릴 수 없습니다.")) return;
+  try{
+    const { error } = await sb.from("sightings").delete().eq("id", id);
+    if(error) throw error;
+    state.sightings = state.sightings.filter(s => s.id !== id);
+    if(state.editingId === id) state.editingId = null;
+    state.banner = null;
+  }catch(e){
+    state.banner = "⚠ 사건 파일 삭제에 실패했습니다: " + friendlyAuthError(e.message);
+  }
+  render();
+}
 async function addWitness(id){
   const s = state.sightings.find(x=>x.id===id);
   if(!s) return;
@@ -538,6 +572,47 @@ async function addComment(sightingId, content){
     }];
   }catch(e){
     state.banner = "⚠ 댓글 등록에 실패했습니다: " + friendlyAuthError(e.message);
+  }
+  render();
+}
+
+async function updateComment(sightingId, commentId, content){
+  const text = (content || "").trim();
+  if(!text) return;
+  const s = state.sightings.find(x=>x.id===sightingId);
+  if(!s) return;
+  try{
+    const { data: updated, error } = await sb
+      .from("comments")
+      .update({ content: text })
+      .eq("id", commentId)
+      .select("id, author, content, created_at")
+      .single();
+    if(error) throw error;
+    s.comments = (s.comments||[]).map(c => c.id === commentId ? {
+      id: updated.id,
+      author: updated.author,
+      content: updated.content,
+      createdAt: updated.created_at,
+    } : c);
+    delete state.editingComments[commentId];
+  }catch(e){
+    state.banner = "⚠ 댓글 수정에 실패했습니다: " + friendlyAuthError(e.message);
+  }
+  render();
+}
+
+async function deleteComment(sightingId, commentId){
+  if(!window.confirm("이 댓글을 삭제할까요?")) return;
+  const s = state.sightings.find(x=>x.id===sightingId);
+  if(!s) return;
+  try{
+    const { error } = await sb.from("comments").delete().eq("id", commentId);
+    if(error) throw error;
+    s.comments = (s.comments||[]).filter(c => c.id !== commentId);
+    delete state.editingComments[commentId];
+  }catch(e){
+    state.banner = "⚠ 댓글 삭제에 실패했습니다: " + friendlyAuthError(e.message);
   }
   render();
 }
@@ -705,6 +780,7 @@ function renderCard(s){
         <span class="reporter">제보자 · ${esc(s.reporter)} · 동일 목격 ${wCount}건</span>
         <div class="card-actions">
           ${iAmAuthor ? `<button class="edit-btn" data-edit="${s.id}">수정</button>` : ""}
+          ${iAmAuthor ? `<button class="delete-btn" data-delete="${s.id}">삭제</button>` : ""}
           <button class="witness-btn ${iAmWitness?'done':''}" data-witness="${s.id}" ${iAmWitness?'disabled':''}>
             ${iAmWitness ? "제보 반영됨" : "나도 봤어요"}
           </button>
@@ -720,12 +796,32 @@ function renderComments(s){
   const list = s.comments || [];
   return `
     <div class="comments">
-      ${list.length===0 ? `<div class="no-comments">아직 댓글이 없습니다. 첫 댓글을 남겨보세요.</div>` : list.map(c => `
-        <div class="comment">
-          <span class="comment-author">${esc(c.author)}</span>
-          <span class="comment-text">${esc(c.content)}</span>
-        </div>
-      `).join("")}
+      ${list.length===0 ? `<div class="no-comments">아직 댓글이 없습니다. 첫 댓글을 남겨보세요.</div>` : list.map(c => {
+        const iAmCommentAuthor = c.author === state.currentUser;
+        if(state.editingComments[c.id]){
+          return `
+            <form class="comment-edit-form" data-comment-edit-form="${s.id}" data-comment-id="${c.id}">
+              <input type="text" class="comment-input" value="${esc(c.content)}" maxlength="500">
+              <button type="submit" class="btn primary">저장</button>
+              <button type="button" class="btn" data-cancel-comment-edit="${c.id}">취소</button>
+            </form>
+          `;
+        }
+        return `
+          <div class="comment">
+            <div class="comment-body">
+              <span class="comment-author">${esc(c.author)}</span>
+              <span class="comment-text">${esc(c.content)}</span>
+            </div>
+            ${iAmCommentAuthor ? `
+              <div class="comment-actions">
+                <span class="comment-action" data-comment-edit="${c.id}" data-sighting-id="${s.id}">수정</span>
+                <span class="comment-action" data-comment-delete="${c.id}" data-sighting-id="${s.id}">삭제</span>
+              </div>
+            ` : ""}
+          </div>
+        `;
+      }).join("")}
       <form class="comment-form" data-comment-form="${s.id}">
         <input type="text" class="comment-input" placeholder="댓글을 입력하세요" maxlength="500">
         <button type="submit" class="btn primary">등록</button>
@@ -822,6 +918,9 @@ function bindEvents(){
   document.querySelectorAll("[data-edit]").forEach(el=>{
     el.onclick = ()=>{ pendingImageFile = null; state.editingId = el.dataset.edit; state.showIntake = false; render(); };
   });
+  document.querySelectorAll("[data-delete]").forEach(el=>{
+    el.onclick = ()=>{ deleteSighting(el.dataset.delete); };
+  });
   document.querySelectorAll("[data-comments-toggle]").forEach(el=>{
     el.onclick = ()=>{
       const id = el.dataset.commentsToggle;
@@ -838,6 +937,34 @@ function bindEvents(){
       if(!text.trim()) return;
       input.disabled = true;
       addComment(id, text);
+    };
+  });
+  document.querySelectorAll("[data-comment-edit]").forEach(el=>{
+    el.onclick = ()=>{
+      state.editingComments[el.dataset.commentEdit] = true;
+      render();
+    };
+  });
+  document.querySelectorAll("[data-cancel-comment-edit]").forEach(el=>{
+    el.onclick = ()=>{
+      delete state.editingComments[el.dataset.cancelCommentEdit];
+      render();
+    };
+  });
+  document.querySelectorAll("[data-comment-delete]").forEach(el=>{
+    el.onclick = ()=>{
+      deleteComment(el.dataset.sightingId, el.dataset.commentDelete);
+    };
+  });
+  document.querySelectorAll("[data-comment-edit-form]").forEach(form=>{
+    form.onsubmit = (e)=>{
+      e.preventDefault();
+      const sightingId = form.dataset.commentEditForm;
+      const commentId = form.dataset.commentId;
+      const input = form.querySelector(".comment-input");
+      const text = input.value;
+      if(!text.trim()) return;
+      updateComment(sightingId, commentId, text);
     };
   });
   document.querySelectorAll("[data-lightbox]").forEach(el=>{
