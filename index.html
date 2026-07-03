@@ -347,6 +347,17 @@ function mapSighting(row){
   };
 }
 
+// 사건 파일의 CASE 번호는 "화면에 표시되는 순서"가 아니라
+// "최초 등록된 순서(오래된 순)"를 기준으로 한 번 계산해 고정합니다.
+// 이렇게 해야 정렬/필터/검색과 무관하게, 그리고 새 사건이 등록되어도
+// 기존 사건의 번호가 밀리지 않습니다.
+function refreshCaseNumbers(){
+  const asc = [...state.sightings].sort(
+    (a, b) => new Date(a.createdAt) - new Date(b.createdAt)
+  );
+  asc.forEach((s, i) => { s.caseNumber = i + 1; });
+}
+
 async function fetchSightings(){
   const { data, error } = await sb
     .from("sightings")
@@ -367,6 +378,7 @@ async function loadAll(){
   if(state.currentUser){
     try{
       state.sightings = await fetchSightings();
+      refreshCaseNumbers();
     }catch(e){
       state.sightings = [];
       state.banner = "⚠ 사건 기록을 불러오지 못했습니다: " + friendlyAuthError(e.message);
@@ -382,7 +394,7 @@ async function loadAll(){
       state.currentUser = newUser;
       state.showIntake = false;
       if(newUser){
-        fetchSightings().then(s => { state.sightings = s; render(); }).catch(()=>{});
+        fetchSightings().then(s => { state.sightings = s; refreshCaseNumbers(); render(); }).catch(()=>{});
       }
       render();
     }
@@ -395,7 +407,7 @@ function statusOf(s){
   if(n>=1) return {key:"investigating", label:"조사중"};
   return {key:"unconfirmed", label:"미확인"};
 }
-function caseCode(idx){ return "CASE-" + String(idx+1).padStart(4,"0"); }
+function caseCode(num){ return "CASE-" + String(num).padStart(4,"0"); }
 function esc(str){
   const d = document.createElement("div");
   d.textContent = str==null?"":str;
@@ -422,6 +434,7 @@ async function doRegister(username, password){
     }
     state.currentUser = data.user.user_metadata.username;
     state.sightings = await fetchSightings();
+    refreshCaseNumbers();
   }catch(e){
     state.authError = friendlyAuthError(e.message);
   }finally{
@@ -442,6 +455,7 @@ async function doLogin(username, password){
     if(error) throw error;
     state.currentUser = data.user.user_metadata.username;
     state.sightings = await fetchSightings();
+    refreshCaseNumbers();
   }catch(e){
     state.authError = friendlyAuthError(e.message);
   }finally{
@@ -486,6 +500,7 @@ async function addSighting(data){
       .single();
     if(error) throw error;
     state.sightings = [mapSighting(created), ...state.sightings];
+    refreshCaseNumbers();
     state.showIntake = false;
     state.banner = null;
   }catch(e){
@@ -513,6 +528,7 @@ async function updateSighting(id, data){
     const prev = state.sightings.find(s => s.id === id);
     mapped.comments = prev ? prev.comments : [];
     state.sightings = state.sightings.map(s => s.id === id ? mapped : s);
+    refreshCaseNumbers();
     state.editingId = null;
     state.banner = null;
   }catch(e){
@@ -526,6 +542,7 @@ async function deleteSighting(id){
     const { error } = await sb.from("sightings").delete().eq("id", id);
     if(error) throw error;
     state.sightings = state.sightings.filter(s => s.id !== id);
+    refreshCaseNumbers();
     if(state.editingId === id) state.editingId = null;
     state.banner = null;
   }catch(e){
@@ -682,7 +699,6 @@ function renderAuth(){
 
 function renderMain(){
   const list = state.sightings
-    .map((s, idx) => ({...s, _origIdx: idx}))
     .filter(s => state.filterCat==="all" || s.category===state.filterCat)
     .filter(s => {
       if(!state.search) return true;
@@ -779,7 +795,7 @@ function renderCard(s){
   return `
     <div class="card">
       <div class="card-top">
-        <span class="case-code">${caseCode(s._origIdx)}</span>
+        <span class="case-code">${caseCode(s.caseNumber)}</span>
         <span class="stamp ${st.key}">${st.label}</span>
       </div>
       ${s.image ? `<img class="card-img" src="${esc(s.image)}" data-lightbox="${esc(s.image)}" onerror="this.style.display='none'">` : ""}
