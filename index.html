@@ -636,12 +636,12 @@ function render(){
         <h1>이상현상 조사국</h1>
         <span class="code">EX-FILES ARCHIVE</span>
       </div>
-      <div class="subline">// 목격 제보 접수 및 사건 기록 보관소 — 미확인 생명체 · 초자연현상 통합 데이터베이스</div>
+      <div class="subline">목격 제보 접수 및 사건 기록 보관소 — 미확인 생명체 · 초자연현상 통합 데이터베이스</div>
     </div>
     ${state.banner ? `<div class="banner"><span>${esc(state.banner)}</span><button id="dismiss-banner">닫기</button></div>` : ""}
     ${state.currentUser ? renderMain() : renderAuth()}
     ${state.lightboxImg ? `<div class="lightbox" id="lightbox"><img src="${esc(state.lightboxImg)}"></div>` : ""}
-    <footer class="note">본 기록보관소는 참여자 간 재미로 공유되는 제보 아카이브이며, 인증된 조사 자료가 아닙니다.</footer>
+    <footer class="note">본 기록보관소는 재미로 공유되는 제보 아카이브이며, 인증된 조사 자료가 아닙니다. 헛소리 실컷 적어주세요. (동의 없는 개인정보 유출은 형사처벌 대상입니다.)</footer>
   `;
   bindEvents();
 
